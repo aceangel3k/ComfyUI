@@ -210,6 +210,9 @@ class PromptServer():
         self.messages = asyncio.Queue()
         self.client_session:Optional[aiohttp.ClientSession] = None
         self.number = 0
+        
+        # Add download progress tracking
+        self.download_progress = {}  # {url: {progress, downloaded, total, status, error}}
 
         middlewares = [cache_control, deprecation_warning]
         if args.enable_compress_response_body:
@@ -975,6 +978,134 @@ class PromptServer():
 
             return web.Response(status=200)
 
+    async def download_model(self, request):
+        """Download model from URL to appropriate ComfyUI models folder with progress tracking"""
+        try:
+            data = await request.json()
+            url = data.get('url')
+            model_type = data.get('model_type')
+            filename = data.get('filename')
+            
+            if not url or not model_type or not filename:
+                return web.json_response({"error": "Missing required parameters: url, model_type, filename"}, status=400)
+            
+            # Validate model type
+            if model_type not in folder_paths.folder_names_and_paths:
+                return web.json_response({"error": f"Invalid model type: {model_type}"}, status=400)
+            
+            # Security: Validate filename
+            if '/' in filename or '\\' in filename or '..' in filename:
+                return web.json_response({"error": "Invalid filename: path traversal not allowed"}, status=400)
+            
+            # Get the model directory
+            model_dir = folder_paths.get_folder_paths(model_type)
+            if not model_dir:
+                return web.json_response({"error": f"Could not find model directory for type: {model_type}"}, status=400)
+            
+            # Use the first available path for the model type
+            # model_dir already contains the full path (e.g., /path/to/models/text_encoders)
+            # so we just need to join the filename to it, not add the folder name again
+            model_path = model_dir[0] if isinstance(model_dir, (list, tuple)) else model_dir
+            file_path = os.path.join(model_path, filename)
+            
+            # Initialize progress tracking
+            self.download_progress[url] = {
+                "progress": 0,
+                "downloaded": 0,
+                "total": 0,
+                "status": "starting",
+                "error": None,
+                "file_path": file_path
+            }
+            
+            # Check if file already exists
+            if os.path.exists(file_path):
+                self.download_progress[url]["status"] = "completed"
+                self.download_progress[url]["progress"] = 100
+                return web.json_response({
+                    "success": True,
+                    "message": f"Model already exists at {file_path}",
+                    "path": file_path,
+                    "status": "already_exists"
+                })
+            
+            # Download the file
+            async with self.client_session.get(url) as response:
+                if response.status != 200:
+                    self.download_progress[url]["status"] = "error"
+                    self.download_progress[url]["error"] = f"HTTP {response.status}: Failed to download model"
+                    return web.json_response({"error": f"Failed to download model: HTTP {response.status}"}, status=400)
+                
+                # Get total file size for progress tracking
+                total_size = int(response.headers.get('content-length', 0))
+                self.download_progress[url]["total"] = total_size
+                self.download_progress[url]["status"] = "downloading"
+                
+                downloaded = 0
+                last_progress_report = 0
+                
+                # Download and save the file in chunks
+                with open(file_path, 'wb') as f:
+                    async for chunk in response.content.iter_chunked(1024*1024):  # 1MB chunks
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        # Update progress tracking
+                        self.download_progress[url]["downloaded"] = downloaded
+                        if total_size > 0:
+                            progress = int((downloaded / total_size) * 100)
+                            self.download_progress[url]["progress"] = progress
+                            
+                            # Log progress every 5%
+                            if progress - last_progress_report >= 5:
+                                logging.info(f"Downloading {filename}: {progress}% ({downloaded}/{total_size} bytes)")
+                                last_progress_report = progress
+                
+                # Mark as completed
+                self.download_progress[url]["status"] = "completed"
+                self.download_progress[url]["progress"] = 100
+                
+                return web.json_response({
+                    "success": True,
+                    "message": f"Model downloaded successfully to {file_path}",
+                    "path": file_path,
+                    "status": "downloaded"
+                })
+                
+        except Exception as e:
+            error_msg = f"Download failed: {str(e)}"
+            logging.error(f"Error downloading model: {error_msg}")
+            
+            # Update progress tracking with error
+            if 'url' in locals() and url in self.download_progress:
+                self.download_progress[url]["status"] = "error"
+                self.download_progress[url]["error"] = error_msg
+            
+            return web.json_response({"error": error_msg}, status=500)
+    
+    async def get_download_progress(self, request):
+        """Get download progress for a specific URL"""
+        try:
+            data = await request.json()
+            url = data.get('url')
+            
+            if not url:
+                return web.json_response({"error": "Missing required parameter: url"}, status=400)
+            
+            progress_data = self.download_progress.get(url, {
+                "progress": 0,
+                "downloaded": 0,
+                "total": 0,
+                "status": "not_started",
+                "error": None,
+                "file_path": None
+            })
+            
+            return web.json_response(progress_data)
+            
+        except Exception as e:
+            return web.json_response({"error": f"Failed to get progress: {str(e)}"}, status=500)
+
 
     def __init__(self, loop):
         PromptServer.instance = self
@@ -1017,134 +1148,6 @@ class PromptServer():
         self.custom_node_manager.add_routes(self.routes, self.app, nodes.LOADED_MODULE_DIRS.items())
         self.subgraph_manager.add_routes(self.routes, nodes.LOADED_MODULE_DIRS.items())
         self.app.add_subapp('/internal', self.internal_routes.get_app())
-
-        async def download_model(self, request):
-            """Download model from URL to appropriate ComfyUI models folder with progress tracking"""
-            try:
-                data = await request.json()
-                url = data.get('url')
-                model_type = data.get('model_type')
-                filename = data.get('filename')
-                
-                if not url or not model_type or not filename:
-                    return web.json_response({"error": "Missing required parameters: url, model_type, filename"}, status=400)
-                
-                # Validate model type
-                if model_type not in folder_paths.folder_names_and_paths:
-                    return web.json_response({"error": f"Invalid model type: {model_type}"}, status=400)
-                
-                # Security: Validate filename
-                if '/' in filename or '\\' in filename or '..' in filename:
-                    return web.json_response({"error": "Invalid filename: path traversal not allowed"}, status=400)
-                
-                # Get the model directory
-                model_dir = folder_paths.get_folder_paths(model_type)
-                if not model_dir:
-                    return web.json_response({"error": f"Could not find model directory for type: {model_type}"}, status=400)
-                
-                # Use the first available path for the model type
-                # model_dir already contains the full path (e.g., /path/to/models/text_encoders)
-                # so we just need to join the filename to it, not add the folder name again
-                model_path = model_dir[0] if isinstance(model_dir, (list, tuple)) else model_dir
-                file_path = os.path.join(model_path, filename)
-                
-                # Initialize progress tracking
-                self.download_progress[url] = {
-                    "progress": 0,
-                    "downloaded": 0,
-                    "total": 0,
-                    "status": "starting",
-                    "error": None,
-                    "file_path": file_path
-                }
-                
-                # Check if file already exists
-                if os.path.exists(file_path):
-                    self.download_progress[url]["status"] = "completed"
-                    self.download_progress[url]["progress"] = 100
-                    return web.json_response({
-                        "success": True,
-                        "message": f"Model already exists at {file_path}",
-                        "path": file_path,
-                        "status": "already_exists"
-                    })
-                
-                # Download the file
-                async with self.client_session.get(url) as response:
-                    if response.status != 200:
-                        self.download_progress[url]["status"] = "error"
-                        self.download_progress[url]["error"] = f"HTTP {response.status}: Failed to download model"
-                        return web.json_response({"error": f"Failed to download model: HTTP {response.status}"}, status=400)
-                    
-                    # Get total file size for progress tracking
-                    total_size = int(response.headers.get('content-length', 0))
-                    self.download_progress[url]["total"] = total_size
-                    self.download_progress[url]["status"] = "downloading"
-                    
-                    downloaded = 0
-                    last_progress_report = 0
-                    
-                    # Download and save the file in chunks
-                    with open(file_path, 'wb') as f:
-                        async for chunk in response.content.iter_chunked(1024*1024):  # 1MB chunks
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            
-                            # Update progress tracking
-                            self.download_progress[url]["downloaded"] = downloaded
-                            if total_size > 0:
-                                progress = int((downloaded / total_size) * 100)
-                                self.download_progress[url]["progress"] = progress
-                                
-                                # Log progress every 5%
-                                if progress - last_progress_report >= 5:
-                                    logging.info(f"Downloading {filename}: {progress}% ({downloaded}/{total_size} bytes)")
-                                    last_progress_report = progress
-                    
-                    # Mark as completed
-                    self.download_progress[url]["status"] = "completed"
-                    self.download_progress[url]["progress"] = 100
-                    
-                    return web.json_response({
-                        "success": True,
-                        "message": f"Model downloaded successfully to {file_path}",
-                        "path": file_path,
-                        "status": "downloaded"
-                    })
-                    
-            except Exception as e:
-                error_msg = f"Download failed: {str(e)}"
-                logging.error(f"Error downloading model: {error_msg}")
-                
-                # Update progress tracking with error
-                if 'url' in locals() and url in self.download_progress:
-                    self.download_progress[url]["status"] = "error"
-                    self.download_progress[url]["error"] = error_msg
-                
-                return web.json_response({"error": error_msg}, status=500)
-        
-        async def get_download_progress(self, request):
-            """Get download progress for a specific URL"""
-            try:
-                data = await request.json()
-                url = data.get('url')
-                
-                if not url:
-                    return web.json_response({"error": "Missing required parameter: url"}, status=400)
-                
-                progress_data = self.download_progress.get(url, {
-                    "progress": 0,
-                    "downloaded": 0,
-                    "total": 0,
-                    "status": "not_started",
-                    "error": None,
-                    "file_path": None
-                })
-                
-                return web.json_response(progress_data)
-                
-            except Exception as e:
-                return web.json_response({"error": f"Failed to get progress: {str(e)}"}, status=500)
 
         # Prefix every route with /api for easier matching for delegation.
         # This is very useful for frontend dev server, which need to forward
