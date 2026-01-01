@@ -995,9 +995,18 @@ class PromptServer():
             if model_type not in folder_paths.folder_names_and_paths:
                 return web.json_response({"error": f"Invalid model type: {model_type}"}, status=400)
             
-            # Security: Validate filename
+            # Security: Validate filename - strip path separators and validate
+            original_filename = filename
+            filename = os.path.basename(filename)  # Extract just the filename
+            
+            if not filename:
+                return web.json_response({"error": f"Invalid filename: '{original_filename}' - no valid filename found"}, status=400)
+            
             if '/' in filename or '\\' in filename or '..' in filename:
-                return web.json_response({"error": "Invalid filename: path traversal not allowed"}, status=400)
+                return web.json_response({"error": f"Invalid filename: '{filename}' - path traversal not allowed"}, status=400)
+            
+            # Log the filename extraction for debugging
+            logging.info(f"Download request: url={url}, model_type={model_type}, original_filename='{original_filename}', clean_filename='{filename}'")
             
             # Get the model directory
             model_dir = folder_paths.get_folder_paths(model_type)
@@ -1017,7 +1026,8 @@ class PromptServer():
                 "total": 0,
                 "status": "starting",
                 "error": None,
-                "file_path": file_path
+                "file_path": file_path,
+                "filename": filename
             }
             
             # Check if file already exists
