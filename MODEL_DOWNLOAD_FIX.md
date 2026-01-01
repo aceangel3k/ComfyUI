@@ -108,7 +108,7 @@ To test the complete fix:
 ## Complete Solution Summary
 
 ### Backend Changes
-1. **Added `/download_model` endpoint** (lines 978-1036) with:
+1. **Added `/download_model` endpoint** with:
    - URL, model_type, and filename validation
    - Security checks for path traversal
    - Streaming downloads in 1MB chunks
@@ -116,10 +116,15 @@ To test the complete fix:
 
 2. **Fixed authentication bypass** by registering the route before user authentication in `add_routes()` method
 
-3. **Fixed method definition issue** by creating `download_model` as a proper class method (lines 1038-1085):
+3. **Fixed method definition issue** by creating `download_model` as a proper class method:
    - The original route handler was defined inside `__init__` but wasn't a class method
    - Created a separate `download_model` method that can be referenced in `add_routes()`
    - Maintains all the same functionality and security features
+
+4. **Fixed duplicate route registration issue**:
+   - Removed the original route handler from inside `__init__` to prevent duplicate registration
+   - Only the manually registered route in `add_routes()` remains, eliminating the conflict
+   - Resolves the "Added route will never be executed, method POST is already registered" error
 
 ### Frontend Changes
 1. **Modified `useDownload.ts`**: Removed automatic fallback to browser downloads
