@@ -116,6 +116,11 @@ To test the complete fix:
 
 2. **Fixed authentication bypass** by registering the route before user authentication in `add_routes()` method
 
+3. **Fixed method definition issue** by creating `download_model` as a proper class method (lines 1038-1085):
+   - The original route handler was defined inside `__init__` but wasn't a class method
+   - Created a separate `download_model` method that can be referenced in `add_routes()`
+   - Maintains all the same functionality and security features
+
 ### Frontend Changes
 1. **Modified `useDownload.ts`**: Removed automatic fallback to browser downloads
 2. **Enhanced `FileDownload.vue`**: Added proper error display with manual fallback option

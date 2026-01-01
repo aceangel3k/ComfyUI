@@ -1035,6 +1035,65 @@ class PromptServer():
                 logging.error(f"Error downloading model: {str(e)}")
                 return web.json_response({"error": f"Download failed: {str(e)}"}, status=500)
 
+    async def download_model(self, request):
+        """Download a model from URL to the appropriate models folder."""
+        try:
+            json_data = await request.json()
+            url = json_data.get("url")
+            model_type = json_data.get("model_type", "checkpoints")
+            filename = json_data.get("filename")
+            
+            if not url:
+                return web.json_response({"error": "URL is required"}, status=400)
+            
+            if not filename:
+                return web.json_response({"error": "Filename is required"}, status=400)
+            
+            # Validate model type exists
+            if model_type not in folder_paths.folder_names_and_paths:
+                return web.json_response({"error": f"Invalid model type: {model_type}"}, status=400)
+            
+            # Get the model directory path
+            model_dir = folder_paths.folder_names_and_paths[model_type][0][0]
+            
+            # Security validation for filename
+            if filename[0] == '/' or '..' in filename or '\\' in filename:
+                return web.json_response({"error": "Invalid filename"}, status=400)
+            
+            # Create full file path
+            file_path = os.path.join(model_dir, filename)
+            file_path = os.path.abspath(file_path)
+            
+            # Security check: ensure the file path is within the model directory
+            if not file_path.startswith(os.path.abspath(model_dir)):
+                return web.json_response({"error": "Invalid file path"}, status=400)
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            
+            # Download the file
+            async with self.client_session.get(url) as response:
+                if response.status != 200:
+                    return web.json_response({"error": f"Failed to download: HTTP {response.status}"}, status=400)
+                
+                # Stream download to file
+                with open(file_path, 'wb') as f:
+                    async for chunk in response.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                        f.write(chunk)
+            
+            logging.info(f"Successfully downloaded model to {file_path}")
+            return web.json_response({
+                "success": True,
+                "message": f"Model downloaded to {file_path}",
+                "path": file_path
+            })
+            
+        except json.JSONDecodeError:
+            return web.json_response({"error": "Invalid JSON"}, status=400)
+        except Exception as e:
+            logging.error(f"Error downloading model: {str(e)}")
+            return web.json_response({"error": f"Download failed: {str(e)}"}, status=500)
+
     async def setup(self):
         timeout = aiohttp.ClientTimeout(total=None) # no timeout
         self.client_session = aiohttp.ClientSession(timeout=timeout)
