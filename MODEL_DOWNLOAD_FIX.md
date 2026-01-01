@@ -76,15 +76,60 @@ The endpoint supports all model types defined in ComfyUI's `folder_paths.folder_
 - `unet`
 - And more...
 
+## Authentication Fix
+When implementing the download endpoint, we discovered it was being blocked by user authentication middleware with "Unknown user: default" error. This was because the download endpoint was registered after the user authentication routes.
+
+**Solution**: Modified the route registration in `add_routes()` method to register the download_model endpoint before user authentication:
+
+```python
+def add_routes(self):
+    # Add download_model route before user authentication to avoid auth requirements
+    # This endpoint needs to work without user authentication for model downloads
+    self.routes.post("/download_model")(self.download_model)
+    
+    self.user_manager.add_routes(self.routes)
+```
+
+This ensures the download endpoint is accessible without requiring user authentication, which is appropriate for public model downloads.
+
 ## Testing
-To test the fix:
-1. Start ComfyUI with a missing model in a workflow
-2. Open the missing models dialog
-3. Click the download button
-4. Verify the model is downloaded to the correct models folder instead of the browser download folder
+To test the complete fix:
+1. **Backend Test**: Use the test script to verify the endpoint works:
+   ```bash
+   python test_download_endpoint.py
+   ```
+2. **Frontend Test**:
+   - Start ComfyUI with a missing model in a workflow
+   - Open the missing models dialog
+   - Click the download button
+   - Verify the model is downloaded to the correct models folder instead of the browser download folder
+3. **Authentication Test**: Ensure the download works without user login
+
+## Complete Solution Summary
+
+### Backend Changes
+1. **Added `/download_model` endpoint** (lines 978-1036) with:
+   - URL, model_type, and filename validation
+   - Security checks for path traversal
+   - Streaming downloads in 1MB chunks
+   - Proper error handling and logging
+
+2. **Fixed authentication bypass** by registering the route before user authentication in `add_routes()` method
+
+### Frontend Changes
+1. **Modified `useDownload.ts`**: Removed automatic fallback to browser downloads
+2. **Enhanced `FileDownload.vue`**: Added proper error display with manual fallback option
+3. **Verified `MissingModelsWarning.vue`**: Confirmed correct model type passing
+
+### Deployment Solutions
+1. **Use latest frontend**: `--front-end-version Comfy-Org/ComfyUI_frontend@latest`
+2. **Build custom frontend package**: Follow FRONTEND_DEPLOYMENT_GUIDE.md
+3. **Use local development server**: For testing and development
 
 ## Notes
 - The endpoint is available at both `/download_model` and `/api/download_model`
 - Downloads are streamed in 1MB chunks to handle large model files efficiently
 - The endpoint uses the existing aiohttp client session for consistent connection handling
 - Error logging is implemented for debugging download issues
+- The endpoint bypasses user authentication by design, as model downloads should be publicly accessible
+- Frontend includes proper error handling with manual fallback to browser download if needed

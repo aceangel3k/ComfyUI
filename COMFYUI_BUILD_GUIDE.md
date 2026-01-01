@@ -2,6 +2,20 @@
 
 This guide explains how to build ComfyUI with the updated frontend that includes the model download fix.
 
+## 🚨 Important Update: Model Download Fix
+
+The model download issue has been **identifed and fixed**. The problem was in the frontend logic where automatic fallback to browser download was masking server-side download errors.
+
+### What was fixed:
+1. **Backend**: Added `/api/download_model` endpoint to `server.py`
+2. **Frontend**: Removed automatic fallback to browser download when server download fails
+3. **UI**: Added proper error handling with optional browser download fallback button
+
+### Key changes:
+- **useDownload.ts**: Removed automatic fallback, added manual fallback option
+- **FileDownload.vue**: Enhanced error display with browser fallback option
+- **MissingModelsWarning.vue**: Correctly passes model type to server download
+
 ## Prerequisites
 
 - Python 3.10-3.13 (3.14 works but may have issues with torch compile node)

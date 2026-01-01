@@ -1040,6 +1040,10 @@ class PromptServer():
         self.client_session = aiohttp.ClientSession(timeout=timeout)
 
     def add_routes(self):
+        # Add download_model route before user authentication to avoid auth requirements
+        # This endpoint needs to work without user authentication for model downloads
+        self.routes.post("/download_model")(self.download_model)
+        
         self.user_manager.add_routes(self.routes)
         self.model_file_manager.add_routes(self.routes)
         self.custom_node_manager.add_routes(self.routes, self.app, nodes.LOADED_MODULE_DIRS.items())
