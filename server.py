@@ -1025,8 +1025,10 @@ class PromptServer():
             logging.info(f"Successfully downloaded model to {file_path}")
             return web.json_response({
                 "success": True,
-                "message": f"Model downloaded to {file_path}",
-                "path": file_path
+                "message": f"Model downloaded successfully to {model_type} folder",
+                "file_path": file_path,
+                "model_type": model_type,
+                "filename": filename
             })
             
         except json.JSONDecodeError:
