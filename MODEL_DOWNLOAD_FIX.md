@@ -114,7 +114,10 @@ To test the complete fix:
    - Streaming downloads in 1MB chunks
    - Proper error handling and logging
 
-2. **Fixed authentication bypass** by registering the route before user authentication in `add_routes()` method
+2. **Fixed authentication bypass** by creating a separate public route table:
+   - Created `public_routes` RouteTableDef specifically for the download endpoint
+   - Added public routes directly to the app before user manager routes
+   - This completely bypasses the user authentication middleware
 
 3. **Fixed method definition issue** by creating `download_model` as a proper class method:
    - The original route handler was defined inside `__init__` but wasn't a class method
@@ -125,6 +128,11 @@ To test the complete fix:
    - Removed the original route handler from inside `__init__` to prevent duplicate registration
    - Only the manually registered route in `add_routes()` remains, eliminating the conflict
    - Resolves the "Added route will never be executed, method POST is already registered" error
+
+5. **Fixed middleware bypass completely**:
+   - The key insight was that all routes go through the middleware stack regardless of registration order
+   - By adding the download route to a separate RouteTableDef and adding it directly to the app first
+   - The download endpoint now completely bypasses user authentication middleware
 
 ### Frontend Changes
 1. **Modified `useDownload.ts`**: Removed automatic fallback to browser downloads
