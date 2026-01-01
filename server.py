@@ -1109,27 +1109,6 @@ class PromptServer():
             return web.json_response({"error": f"Failed to get progress: {str(e)}"}, status=500)
 
 
-    def __init__(self, loop):
-        PromptServer.instance = self
-
-        mimetypes.init()
-        mimetypes.add_type('application/javascript; charset=utf-8', '.js')
-        mimetypes.add_type('image/webp', '.webp')
-
-        self.user_manager = UserManager()
-        self.model_file_manager = ModelFileManager()
-        self.custom_node_manager = CustomNodeManager()
-        self.subgraph_manager = SubgraphManager()
-        self.internal_routes = InternalRoutes(self)
-        self.supports = ["custom_nodes_from_web"]
-        self.prompt_queue = execution.PromptQueue(self)
-        self.loop = loop
-        self.messages = asyncio.Queue()
-        self.client_session:Optional[aiohttp.ClientSession] = None
-        self.number = 0
-        
-        # Add download progress tracking
-        self.download_progress = {}  # {url: {progress, downloaded, total, status, error}}
 
     async def setup(self):
         timeout = aiohttp.ClientTimeout(total=None) # no timeout
