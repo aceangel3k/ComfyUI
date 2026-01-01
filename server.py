@@ -214,7 +214,12 @@ class PromptServer():
         # Add download progress tracking
         self.download_progress = {}  # {url: {progress, downloaded, total, status, error}}
 
+        max_upload_size = round(args.max_upload_size * 1024 * 1024)
+        self.app = web.Application(client_max_size=max_upload_size, middlewares=[cache_control, deprecation_warning])
+
         middlewares = [cache_control, deprecation_warning]
+        middlewares = []
+        
         if args.enable_compress_response_body:
             middlewares.append(compress_body)
 
@@ -228,9 +233,6 @@ class PromptServer():
 
         if args.enable_manager:
             middlewares.append(comfyui_manager.create_middleware())
-
-        max_upload_size = round(args.max_upload_size * 1024 * 1024)
-        self.app = web.Application(client_max_size=max_upload_size, middlewares=middlewares)
         self.sockets = dict()
         self.sockets_metadata = dict()
         self.web_root = (
