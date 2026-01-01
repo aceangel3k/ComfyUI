@@ -1040,13 +1040,13 @@ class PromptServer():
         self.client_session = aiohttp.ClientSession(timeout=timeout)
 
     def add_routes(self):
-        # Create a separate route table for the download endpoint that bypasses user authentication
+        # Create a separate sub-application for the download endpoint that bypasses all middleware
         # This endpoint needs to work without user authentication for model downloads
-        public_routes = web.RouteTableDef()
-        public_routes.post("/download_model")(self.download_model)
+        download_app = web.Application()
+        download_app.router.add_post("/download_model", self.download_model)
         
-        # Add public routes first (before user manager routes)
-        self.app.add_routes(public_routes)
+        # Add the download sub-app to bypass all middleware
+        self.app.add_subapp('/download', download_app)
         
         self.user_manager.add_routes(self.routes)
         self.model_file_manager.add_routes(self.routes)

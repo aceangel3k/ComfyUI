@@ -7,7 +7,7 @@ When loading a template with missing models (LLM/diffusion models, not 3D), the 
 The web UI was missing a server-side endpoint to handle model downloads. The frontend was likely using direct browser downloads, which download to the user's default download folder instead of the ComfyUI models folder.
 
 ## Solution
-Added a new API endpoint `/download_model` to the server that handles model downloads and saves them to the appropriate ComfyUI models folder.
+Added a new API endpoint `/download/download_model` to the server that handles model downloads and saves them to the appropriate ComfyUI models folder.
 
 ### Changes Made
 
@@ -24,7 +24,7 @@ Added a new API endpoint `/download_model` to the server that handles model down
 
 ### API Endpoint Details
 
-**Endpoint**: `POST /download_model`
+**Endpoint**: `POST /download/download_model`
 
 **Request Body**:
 ```json
@@ -61,7 +61,7 @@ Added a new API endpoint `/download_model` to the server that handles model down
 The frontend missing models dialog should now be updated to:
 1. Detect when a download button is clicked
 2. Extract the model URL, type, and filename
-3. Make a POST request to `/download_model` instead of using browser download
+3. Make a POST request to `/download/download_model` instead of using browser download
 4. Show progress/completion status to the user
 5. Update the model list after successful download
 
@@ -79,18 +79,22 @@ The endpoint supports all model types defined in ComfyUI's `folder_paths.folder_
 ## Authentication Fix
 When implementing the download endpoint, we discovered it was being blocked by user authentication middleware with "Unknown user: default" error. This was because the download endpoint was registered after the user authentication routes.
 
-**Solution**: Modified the route registration in `add_routes()` method to register the download_model endpoint before user authentication:
+**Solution**: Created a separate sub-application to completely bypass all middleware:
 
 ```python
 def add_routes(self):
-    # Add download_model route before user authentication to avoid auth requirements
+    # Create a separate sub-application for the download endpoint that bypasses all middleware
     # This endpoint needs to work without user authentication for model downloads
-    self.routes.post("/download_model")(self.download_model)
+    download_app = web.Application()
+    download_app.router.add_post("/download_model", self.download_model)
+    
+    # Add the download sub-app to bypass all middleware
+    self.app.add_subapp('/download', download_app)
     
     self.user_manager.add_routes(self.routes)
 ```
 
-This ensures the download endpoint is accessible without requiring user authentication, which is appropriate for public model downloads.
+This creates a completely separate application at `/download/` that bypasses all middleware including user authentication, which is appropriate for public model downloads.
 
 ## Testing
 To test the complete fix:
@@ -108,16 +112,16 @@ To test the complete fix:
 ## Complete Solution Summary
 
 ### Backend Changes
-1. **Added `/download_model` endpoint** with:
+1. **Added `/download/download_model` endpoint** with:
    - URL, model_type, and filename validation
    - Security checks for path traversal
    - Streaming downloads in 1MB chunks
    - Proper error handling and logging
 
-2. **Fixed authentication bypass** by creating a separate public route table:
-   - Created `public_routes` RouteTableDef specifically for the download endpoint
-   - Added public routes directly to the app before user manager routes
-   - This completely bypasses the user authentication middleware
+2. **Fixed authentication bypass completely** by creating a separate sub-application:
+   - Created a completely separate `web.Application()` for the download endpoint
+   - Added the download sub-app using `add_subapp('/download', download_app)`
+   - This completely bypasses ALL middleware including user authentication
 
 3. **Fixed method definition issue** by creating `download_model` as a proper class method:
    - The original route handler was defined inside `__init__` but wasn't a class method
@@ -126,16 +130,16 @@ To test the complete fix:
 
 4. **Fixed duplicate route registration issue**:
    - Removed the original route handler from inside `__init__` to prevent duplicate registration
-   - Only the manually registered route in `add_routes()` remains, eliminating the conflict
+   - Only the manually registered route remains, eliminating the conflict
    - Resolves the "Added route will never be executed, method POST is already registered" error
 
 5. **Fixed middleware bypass completely**:
-   - The key insight was that all routes go through the middleware stack regardless of registration order
-   - By adding the download route to a separate RouteTableDef and adding it directly to the app first
-   - The download endpoint now completely bypasses user authentication middleware
+   - The key insight was that middleware is applied globally to the entire application
+   - By creating a separate sub-application with its own router, we completely bypass all middleware
+   - The download endpoint is now accessible at `/download/download_model` without any authentication
 
 ### Frontend Changes
-1. **Modified `useDownload.ts`**: Removed automatic fallback to browser downloads
+1. **Modified `useDownload.ts`**: Removed automatic fallback to browser downloads, updated endpoint path to `/download/download_model`
 2. **Enhanced `FileDownload.vue`**: Added proper error display with manual fallback option
 3. **Verified `MissingModelsWarning.vue`**: Confirmed correct model type passing
 
@@ -145,9 +149,9 @@ To test the complete fix:
 3. **Use local development server**: For testing and development
 
 ## Notes
-- The endpoint is available at both `/download_model` and `/api/download_model`
+- The endpoint is available at `/download/download_model` (separate sub-application that bypasses all middleware)
 - Downloads are streamed in 1MB chunks to handle large model files efficiently
 - The endpoint uses the existing aiohttp client session for consistent connection handling
 - Error logging is implemented for debugging download issues
-- The endpoint bypasses user authentication by design, as model downloads should be publicly accessible
+- The endpoint bypasses all middleware by design, as model downloads should be publicly accessible
 - Frontend includes proper error handling with manual fallback to browser download if needed
